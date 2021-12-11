@@ -1,4 +1,4 @@
-list(APPEND CMAKE_PREFIX_PATH "/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/code/libtorch_learning/EDVRProject/libtorch")
+list(APPEND CMAKE_PREFIX_PATH "/usr/local/libtorch")
 find_package(Torch REQUIRED) 
 
 add_library(models edvr.cpp)

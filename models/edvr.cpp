@@ -4,7 +4,7 @@
 #include <iomanip>
 #include <stdio.h>  
 
-#include "dcn/deform_conv_ext.cpp"
+// #include "dcn/deform_conv_ext.cpp"
 using namespace std;
 
 // 
@@ -23,11 +23,13 @@ class ResidualBlockNoBN: public torch::nn::Module {
     torch::nn::ReLU relu{nullptr};
 };
 
+
 ResidualBlockNoBN::ResidualBlockNoBN(int mid_channels) {
   conv1 = register_module("conv1",torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
   conv2 = register_module("conv2",torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
   relu = register_module("relu", torch::nn::ReLU(torch::nn::ReLUOptions().inplace(true)));
 }
+
 
 torch::Tensor ResidualBlockNoBN::forward(torch::Tensor x) {
   torch::Tensor identity = x;
