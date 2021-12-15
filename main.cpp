@@ -4,8 +4,12 @@
 #include <iomanip>
 #include <stdio.h>
 #include <opencv2/opencv.hpp>
-#include <opencv2/core/core.hpp>    
+#include <opencv2/core/core.hpp>  
+#include <ATen/ATen.h>  
 #include <ATen/DeviceGuard.h>
+#include <memory>
+#include <torch/extension.h>
+#include <cuda.h>
 
 // load VSR model
 #include "models/edvr.cpp"
