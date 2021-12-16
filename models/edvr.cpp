@@ -3,12 +3,12 @@
 #include <iostream>
 #include <iomanip>
 #include <stdio.h> 
+#include <vector>
 // #include <src/deform_conv_ext.cpp> // error occured!
 #include "dcn/src/deform_conv_ext.cpp"
 using namespace std;
 
 
-// Residual block
 class ResidualBlockNoBN: public torch::nn::Module {
   public:
     ResidualBlockNoBN(int mid_channels);
@@ -18,39 +18,6 @@ class ResidualBlockNoBN: public torch::nn::Module {
     torch::nn::Conv2d conv1{nullptr}, conv2{nullptr};
     torch::nn::ReLU relu{nullptr};
 };
-
-// DCN block
-class ModulatedDeformConvPack: public torch::nn::Module {
-  public:
-    ModulatedDeformConvPack(int in_channels, int out_channels, int kernel_size, int stride, int padding, int dilation, int groups, int deformable_groups);
-    torch::Tensor forward(torch::Tensor x, torch::Tensor feat);
-  private:
-    torch::nn::Conv2d conv_offset{nullptr};
-};
-
-ModulatedDeformConvPack::ModulatedDeformConvPack(int in_channels, int out_channels, int kernel_size, int stride, int padding, int dilation, int groups, int deformable_groups){
-  // init parameters
-  conv_offset = register_module("conv_offset", torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, deformable_groups * 3 * kernel_size * kernel_size, {kernel_size, kernel_size}).stride(stride).padding(padding).dilation(dilation).bias(true)));
-};
-
-torch::Tensor ModulatedDeformConvPack::forward(torch::Tensor x, torch::Tensor feat) {
-  // auto out = conv_offset->forward(x);
-  // auto o1, o2, mask = torch::chunk(out, 3, 1);
-
-  cout << "ModulatedDeformConvPack testing..." << endl;
-  cout << x.sizes() << endl;
-  return x;
-}
-
-torch::nn::Sequential DCNv2Pack(
-  int in_channels, int out_channels, int kernel_size, int stride, int padding, int dilation, int groups, int deformable_groups) {
-
-  torch::nn::Sequential features;
-  features->push_back(ModulatedDeformConvPack(
-    in_channels, out_channels, kernel_size, stride, padding, dilation, groups, deformable_groups
-  ));
-  return features;
-}
 
 
 ResidualBlockNoBN::ResidualBlockNoBN(int mid_channels) {
@@ -65,6 +32,44 @@ torch::Tensor ResidualBlockNoBN::forward(torch::Tensor x) {
   auto out = conv2->forward(relu->forward(conv1->forward(x)));
   return out;
 }
+
+
+// DCN block
+class ModulatedDeformConvPack: public torch::nn::Module {
+  public:
+    ModulatedDeformConvPack(int in_channels, int out_channels, int kernel_size, int stride, int padding, int dilation, int groups, int deformable_groups);
+    torch::Tensor forward(torch::Tensor x, torch::Tensor feat);
+  private:
+    torch::nn::Conv2d conv_offset{nullptr};
+};
+
+
+ModulatedDeformConvPack::ModulatedDeformConvPack(int in_channels, int out_channels, int kernel_size, int stride, int padding, int dilation, int groups, int deformable_groups){
+  // init parameters
+  conv_offset = register_module("conv_offset", torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, deformable_groups * 3 * kernel_size * kernel_size, {kernel_size, kernel_size}).stride(stride).padding(padding).dilation(dilation).bias(true)));
+};
+
+
+torch::Tensor ModulatedDeformConvPack::forward(torch::Tensor x, torch::Tensor feat) {
+  // auto out = conv_offset->forward(x);
+  // auto o1, o2, mask = torch::chunk(out, 3, 1);
+
+  cout << "ModulatedDeformConvPack testing..." << endl;
+  cout << x.sizes() << endl;
+  return x;
+}
+
+
+torch::nn::Sequential DCNv2Pack(
+  int in_channels, int out_channels, int kernel_size, int stride, int padding, int dilation, int groups, int deformable_groups) {
+
+  torch::nn::Sequential features;
+  features->push_back(ModulatedDeformConvPack(
+    in_channels, out_channels, kernel_size, stride, padding, dilation, groups, deformable_groups
+  ));
+  return features;
+}
+
 
 // make residual blocks
 torch::nn::Sequential make_layer(int num_blocks, int mid_channels) {
@@ -83,14 +88,104 @@ torch::nn::Sequential make_layer(int num_blocks, int mid_channels) {
   return features;
 };
 
-// make TSA fusion module
-torch::nn::Sequential tsa_fusion(int mid_channels, int num_frame, int center_frame_idx) {
-  torch::nn::Sequential features;
-  features->push_back(ResidualBlockNoBN(mid_channels));
-  return features;
+
+// TSA Fusion module
+class TSAFusion: public torch::nn::Module {
+  public:
+    TSAFusion(int mid_channels, int num_frame, int center_frame_idx);
+    torch::Tensor forward(torch::Tensor aligned_feat);
+  
+  private:
+    int64_t center_frame_idx; 
+    // temporal attention (before fusion conv)
+    torch::nn::Conv2d temporal_attn1{nullptr}, temporal_attn2{nullptr};
+    torch::nn::Conv2d feat_fusion{nullptr};
+  
+    // spatial attention (after fusion conv)
+    torch::nn::MaxPool2d max_pool{nullptr};  
+    torch::nn::AvgPool2d avg_pool{nullptr};
+    torch::nn::Conv2d spatial_attn1{nullptr}, spatial_attn2{nullptr}, spatial_attn3{nullptr}, spatial_attn4{nullptr}, spatial_attn5{nullptr};
+    torch::nn::Conv2d spatial_attn_l1{nullptr}, spatial_attn_l2{nullptr}, spatial_attn_l3{nullptr};
+    torch::nn::Conv2d spatial_attn_add1{nullptr}, spatial_attn_add2{nullptr};
+
+    // activate function
+    torch::nn::LeakyReLU lrelu{nullptr};
+
+    // upsample
+    torch::nn::Upsample upsample{nullptr};
+};
+
+TSAFusion::TSAFusion(int mid_channels, int num_frame, int center_frame_idx){
+  center_frame_idx = center_frame_idx;
+
+  // temporal attention (before fusion conv)
+  temporal_attn1 = register_module("temporal_attn1", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
+  temporal_attn2 = register_module("temporal_attn2", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
+  feat_fusion = register_module("feat_fusion", torch::nn::Conv2d(torch::nn::Conv2dOptions(num_frame * mid_channels, mid_channels, {1,1}).stride(1).bias(true)));
+
+  // spatial attention (after fusion conv)
+  max_pool = register_module("max_pool", torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions({3,3}).stride(1).padding(1)));
+  avg_pool = register_module("avg_pool",torch::nn::AvgPool2d(torch::nn::AvgPool2dOptions({3,3}).stride(2).padding(1)));
+  spatial_attn1 = register_module("spatial_attn1", torch::nn::Conv2d(torch::nn::Conv2dOptions(num_frame * mid_channels, mid_channels, {1,1})));
+  spatial_attn2 = register_module("spatial_attn2", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels * 2, mid_channels, {1,1})));
+  spatial_attn3 = register_module("spatial_attn3", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1)));
+  spatial_attn4 = register_module("spatial_attn4", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {1,1})));
+  spatial_attn5 = register_module("spatial_attn5", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1)));
+  
+  spatial_attn_l1 = register_module("spatial_attn_l1", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {1,1})));
+  spatial_attn_l2 = register_module("spatial_attn_l2", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels * 2, mid_channels, {3,3}).stride(1).padding(1)));
+  spatial_attn_l3 = register_module("spatial_attn_l3", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1)));
+  spatial_attn_add1 = register_module("spatial_attn_add1", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {1,1})));
+  spatial_attn_add2 = register_module("spatial_attn_add2", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {1,1})));
+
+  // activate function
+  lrelu = register_module("lrelu", torch::nn::LeakyReLU(torch::nn::LeakyReLUOptions().negative_slope(0.1).inplace(true)));
+
+  // umsample function
+  upsample = register_module("upsample", torch::nn::Upsample(torch::nn::UpsampleOptions().scale_factor(std::vector<double>({2.0})).mode(torch::kBilinear).align_corners(false)));
+};
+
+torch::Tensor TSAFusion::forward(torch::Tensor aligned_feat) {
+  cout << "TSA testing..." <<endl;
+
+  auto b = aligned_feat.sizes()[0]; auto t = aligned_feat.sizes()[1]; auto c = aligned_feat.sizes()[2]; 
+  auto h = aligned_feat.sizes()[3]; auto w = aligned_feat.sizes()[4];
+
+  // temporal attention 
+  auto embedding_ref = temporal_attn1->forward(aligned_feat.select(1, 2).clone());  // center_frame_index: default 2
+  auto embedding = temporal_attn2->forward(aligned_feat.view({{-1, c, h, w}}));
+  embedding = embedding.view({b, t, -1, h, w});
+
+  vector<torch::Tensor> corr_l;
+  for(int i = 0; i < t; i++) {
+    auto emb_neighbor = embedding.select(1,i);  // (b, mid_channels, h, w)
+    auto corr = torch::sum(emb_neighbor * embedding_ref, 1);
+    corr_l.push_back(corr.unsqueeze(1));
+  }
+
+  auto corr_prob = torch::sigmoid(torch::cat(corr_l, 1));  // (b, t, h, w)
+  corr_prob = corr_prob.unsqueeze(2).expand({b, t, c, h, w});
+  corr_prob = corr_prob.contiguous().view({b, -1, h, w});
+
+  aligned_feat = aligned_feat.view({b, -1, h, w}) * corr_prob;
+
+  // fusion
+  auto feat = lrelu->forward(feat_fusion->forward(aligned_feat));
+
+  // spatial attention
+  // auto attn
+
+  return aligned_feat;
 }
 
-// EDVR Net
+torch::nn::Sequential TSAFusionSequential(int mid_channels, int num_frame, int center_frame_idx) {
+  torch::nn::Sequential features;
+  features->push_back(TSAFusion(mid_channels,num_frame,center_frame_idx));
+  return features;
+};
+
+
+// EDVRNet
 class EDVRNet: public torch::nn::Module{
   public:
     EDVRNet(int in_channels, int mid_channels);
@@ -115,7 +210,7 @@ class EDVRNet: public torch::nn::Module{
     torch::nn::Sequential PCDTest{nullptr};
 
     // TSA module
-    torch::nn::Sequential TSAFusion{nullptr};
+    torch::nn::Sequential TSAFusionModule{nullptr};
 
     // upsample
     torch::nn::Conv2d upconv1{nullptr}, upconv2{nullptr}, conv_hr{nullptr}, conv_last{nullptr};
@@ -145,8 +240,8 @@ EDVRNet::EDVRNet(int in_channels, int  mid_channels) {
   PCDTest = register_module("PCDTest", PCDTest);  
 
   // TSA module
-  TSAFusion = tsa_fusion(mid_channels, 5, 2);
-  TSAFusion = register_module("TSAFusion", TSAFusion);
+  TSAFusionModule = TSAFusionSequential(mid_channels, 5, 2);
+  TSAFusionModule = register_module("TSAFusionModule", TSAFusionModule);
 
   // reconstruction
   reconstruction = make_layer(10, mid_channels);  // num_blocks = 5, mid_channels = mid_channels
@@ -206,6 +301,7 @@ torch::Tensor EDVRNet::forward(torch::Tensor x) {
 
   // TSA module 
   // TODO
+  auto ttest = TSAFusionModule->forward(feat_l1);
 
   // Reconstruction module
   // TODO
