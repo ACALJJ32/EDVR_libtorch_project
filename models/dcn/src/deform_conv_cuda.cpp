@@ -1,10 +1,9 @@
 // modify from
 // https://github.com/chengdazhi/Deformable-Convolution-V2-PyTorch/blob/mmdetection/mmdet/ops/dcn/src/deform_conv_cuda.c
 
-// #include <torch/extension.h>
+#include <torch/extension.h>
 #include <ATen/DeviceGuard.h>
-#include <torch/torch.h>
-#include <torch/script.h>
+#include "deform_conv_ext.cpp"
 
 #include <cmath>
 #include <vector>

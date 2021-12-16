@@ -8,12 +8,9 @@
 #include <ATen/ATen.h>  
 #include <ATen/DeviceGuard.h>
 #include <memory>
-#include <torch/extension.h>
-#include <cuda.h>
-
-// load VSR model
-#include "models/edvr.cpp"
-
+#include <dlfcn.h>
+// #include <libraries/dcn.cpython-38-x86_64-linux-gnu.so>
+#include "models/edvr.cpp"  // load VSR model
 using namespace std;
 
 int main() {
@@ -21,6 +18,9 @@ int main() {
   cout<<"Cuda is available: "<<torch::cuda::is_available()<<endl;
   cout<<"Cudnn is available: "<<torch::cuda::cudnn_is_available()<<endl;
   cout<<"GPU count: "<<torch::cuda::device_count()<<endl;
+
+  // Test load library
+  // void *handle = dlopen("./lib/dcn.cpython-38-x86_64-linux-gnu.so", RTLD_NOW);
 
   // Set device
   torch::DeviceType device_type = at::kCPU;
@@ -33,6 +33,5 @@ int main() {
 
   EDVRNet net(3, 64);
   net.to(device_type);
-
   auto output = net.forward(input);
 }

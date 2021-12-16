@@ -2,26 +2,55 @@
 #include <torch/script.h>
 #include <iostream>
 #include <iomanip>
-#include <stdio.h>  
-
-// #include "dcn/deform_conv_ext.cpp"
+#include <stdio.h> 
+// #include <src/deform_conv_ext.cpp> // error occured!
+#include "dcn/src/deform_conv_ext.cpp"
 using namespace std;
 
-// 
-// class 
 
-
+// Residual block
 class ResidualBlockNoBN: public torch::nn::Module {
-  // init module
   public:
     ResidualBlockNoBN(int mid_channels);
     torch::Tensor forward(torch::Tensor x);
   
   private:
-    // register modules
     torch::nn::Conv2d conv1{nullptr}, conv2{nullptr};
     torch::nn::ReLU relu{nullptr};
 };
+
+// DCN block
+class ModulatedDeformConvPack: public torch::nn::Module {
+  public:
+    ModulatedDeformConvPack(int in_channels, int out_channels, int kernel_size, int stride, int padding, int dilation, int groups, int deformable_groups);
+    torch::Tensor forward(torch::Tensor x, torch::Tensor feat);
+  private:
+    torch::nn::Conv2d conv_offset{nullptr};
+};
+
+ModulatedDeformConvPack::ModulatedDeformConvPack(int in_channels, int out_channels, int kernel_size, int stride, int padding, int dilation, int groups, int deformable_groups){
+  // init parameters
+  conv_offset = register_module("conv_offset", torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, deformable_groups * 3 * kernel_size * kernel_size, {kernel_size, kernel_size}).stride(stride).padding(padding).dilation(dilation).bias(true)));
+};
+
+torch::Tensor ModulatedDeformConvPack::forward(torch::Tensor x, torch::Tensor feat) {
+  // auto out = conv_offset->forward(x);
+  // auto o1, o2, mask = torch::chunk(out, 3, 1);
+
+  cout << "ModulatedDeformConvPack testing..." << endl;
+  cout << x.sizes() << endl;
+  return x;
+}
+
+torch::nn::Sequential DCNv2Pack(
+  int in_channels, int out_channels, int kernel_size, int stride, int padding, int dilation, int groups, int deformable_groups) {
+
+  torch::nn::Sequential features;
+  features->push_back(ModulatedDeformConvPack(
+    in_channels, out_channels, kernel_size, stride, padding, dilation, groups, deformable_groups
+  ));
+  return features;
+}
 
 
 ResidualBlockNoBN::ResidualBlockNoBN(int mid_channels) {
@@ -81,6 +110,10 @@ class EDVRNet: public torch::nn::Module{
     // reconstruction
     torch::nn::Sequential reconstruction{nullptr};
 
+    // PCD module  
+    // TODO
+    torch::nn::Sequential PCDTest{nullptr};
+
     // TSA module
     torch::nn::Sequential TSAFusion{nullptr};
 
@@ -104,6 +137,12 @@ EDVRNet::EDVRNet(int in_channels, int  mid_channels) {
   conv_l2_2 = register_module("conv_l2_2", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
   conv_l3_1 = register_module("conv_l3_1", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(2).padding(1).bias(true)));
   conv_l3_2 = register_module("conv_l3_2", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
+
+  //PCD module
+  PCDTest = DCNv2Pack(
+    mid_channels, mid_channels, 3, 1, 1, 1, 1, 8);
+
+  PCDTest = register_module("PCDTest", PCDTest);  
 
   // TSA module
   TSAFusion = tsa_fusion(mid_channels, 5, 2);
@@ -157,9 +196,19 @@ torch::Tensor EDVRNet::forward(torch::Tensor x) {
   feat_l2 = feat_l2.view({b, t, -1, h / 2, w / 2});
   feat_l3 = feat_l3.view({b, t, -1, h / 4, w / 4});
 
+  // PCD module 
+  // TODO
   cout << "feat l1 size: " << feat_l1.sizes() << endl;
   cout << "feat l2 size: " << feat_l2.sizes() << endl;
   cout << "feat l3 size: " << feat_l3.sizes() << endl;
+
+  auto out = PCDTest->forward(feat_l1, feat_l1);
+
+  // TSA module 
+  // TODO
+
+  // Reconstruction module
+  // TODO
 
   return x;
 }
