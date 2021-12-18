@@ -76,13 +76,7 @@ torch::nn::Sequential make_layer(int num_blocks, int mid_channels) {
   torch::nn::Sequential features;
   
   for(int i = 0; i < num_blocks; i++) {
-    auto conv1 = torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true));
-    auto conv2 = torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true));
-    auto relu = torch::nn::ReLU(torch::nn::ReLUOptions().inplace(true)); 
-
-    features->push_back(conv1);
-    features->push_back(relu);
-    features->push_back(conv2);
+    features->push_back(ResidualBlockNoBN(mid_channels));
   }
 
   return features;
@@ -115,35 +109,51 @@ class TSAFusion: public torch::nn::Module {
     torch::nn::Upsample upsample{nullptr};
 };
 
+
 TSAFusion::TSAFusion(int mid_channels, int num_frame, int center_frame_idx){
   center_frame_idx = center_frame_idx;
 
   // temporal attention (before fusion conv)
-  temporal_attn1 = register_module("temporal_attn1", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
-  temporal_attn2 = register_module("temporal_attn2", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
-  feat_fusion = register_module("feat_fusion", torch::nn::Conv2d(torch::nn::Conv2dOptions(num_frame * mid_channels, mid_channels, {1,1}).stride(1).bias(true)));
+  temporal_attn1 = register_module("temporal_attn1",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
+  temporal_attn2 = register_module("temporal_attn2",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
+  feat_fusion = register_module("feat_fusion",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(num_frame * mid_channels, mid_channels, {1,1}).stride(1).bias(true)));
 
   // spatial attention (after fusion conv)
-  max_pool = register_module("max_pool", torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions({3,3}).stride(1).padding(1)));
+  max_pool = register_module("max_pool", torch::nn::MaxPool2d(torch::nn::MaxPool2dOptions({3,3}).stride(2).padding(1)));
   avg_pool = register_module("avg_pool",torch::nn::AvgPool2d(torch::nn::AvgPool2dOptions({3,3}).stride(2).padding(1)));
-  spatial_attn1 = register_module("spatial_attn1", torch::nn::Conv2d(torch::nn::Conv2dOptions(num_frame * mid_channels, mid_channels, {1,1})));
-  spatial_attn2 = register_module("spatial_attn2", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels * 2, mid_channels, {1,1})));
-  spatial_attn3 = register_module("spatial_attn3", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1)));
-  spatial_attn4 = register_module("spatial_attn4", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {1,1})));
-  spatial_attn5 = register_module("spatial_attn5", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1)));
+  spatial_attn1 = register_module("spatial_attn1",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(num_frame * mid_channels, mid_channels, {1,1})));
+  spatial_attn2 = register_module("spatial_attn2",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels * 2, mid_channels, {1,1})));
+  spatial_attn3 = register_module("spatial_attn3",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1)));
+  spatial_attn4 = register_module("spatial_attn4",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {1,1})));
+  spatial_attn5 = register_module("spatial_attn5",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1)));
   
-  spatial_attn_l1 = register_module("spatial_attn_l1", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {1,1})));
-  spatial_attn_l2 = register_module("spatial_attn_l2", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels * 2, mid_channels, {3,3}).stride(1).padding(1)));
-  spatial_attn_l3 = register_module("spatial_attn_l3", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1)));
-  spatial_attn_add1 = register_module("spatial_attn_add1", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {1,1})));
-  spatial_attn_add2 = register_module("spatial_attn_add2", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {1,1})));
+  spatial_attn_l1 = register_module("spatial_attn_l1",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {1,1})));
+  spatial_attn_l2 = register_module("spatial_attn_l2",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels * 2, mid_channels, {3,3}).stride(1).padding(1)));
+  spatial_attn_l3 = register_module("spatial_attn_l3",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1)));
+  spatial_attn_add1 = register_module("spatial_attn_add1",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {1,1})));
+  spatial_attn_add2 = register_module("spatial_attn_add2",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {1,1})));
 
   // activate function
   lrelu = register_module("lrelu", torch::nn::LeakyReLU(torch::nn::LeakyReLUOptions().negative_slope(0.1).inplace(true)));
 
   // umsample function
-  upsample = register_module("upsample", torch::nn::Upsample(torch::nn::UpsampleOptions().scale_factor(std::vector<double>({2.0})).mode(torch::kBilinear).align_corners(false)));
+  upsample = register_module("upsample",\
+   torch::nn::Upsample(torch::nn::UpsampleOptions().scale_factor(std::vector<double> ({2,2})).mode(torch::kBilinear).align_corners(false)));
 };
+
 
 torch::Tensor TSAFusion::forward(torch::Tensor aligned_feat) {
   cout << "TSA testing..." <<endl;
@@ -173,10 +183,31 @@ torch::Tensor TSAFusion::forward(torch::Tensor aligned_feat) {
   auto feat = lrelu->forward(feat_fusion->forward(aligned_feat));
 
   // spatial attention
-  // auto attn
+  auto attn = lrelu->forward(spatial_attn1->forward(aligned_feat));
+  auto attn_max = max_pool->forward(attn);
+  auto attn_avg = avg_pool->forward(attn);
+  attn = lrelu->forward(spatial_attn2->forward(torch::cat({attn_max, attn_avg}, 1)));
 
-  return aligned_feat;
+  // pyramid levels TODO
+  auto attn_level = lrelu->forward(spatial_attn_l1->forward(attn));
+  attn_max = max_pool->forward(attn_level);
+  attn_avg = avg_pool->forward(attn_level);
+  attn_level = lrelu->forward(spatial_attn_l2->forward(torch::cat({attn_max, attn_avg}, 1)));
+  attn_level = lrelu->forward(spatial_attn_l3->forward(attn_level));
+  cout << attn_level.sizes() << endl;
+  attn_level = upsample->forward(attn_level);  // bug occured
+
+  attn = lrelu->forward(spatial_attn3->forward(attn)) + attn_level;
+  attn = lrelu->forward(spatial_attn4->forward(attn));
+  attn = upsample->forward(attn);
+  auto attn_add = spatial_attn_add2(lrelu->forward(spatial_attn_add1->forward(attn)));
+  attn = torch::sigmoid(attn);
+
+  // after initialization, *2 makes (attn * 2) to be close to 1.
+  feat = feat * attn * 2 + attn_add;
+  return feat;
 }
+
 
 torch::nn::Sequential TSAFusionSequential(int mid_channels, int num_frame, int center_frame_idx) {
   torch::nn::Sequential features;
@@ -220,18 +251,24 @@ class EDVRNet: public torch::nn::Module{
     torch::nn::LeakyReLU lrelu{nullptr};
 };
 
+
 // EDVR init function
 EDVRNet::EDVRNet(int in_channels, int  mid_channels) {
-  conv_first = register_module("conv_first", torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
+  conv_first = register_module("conv_first",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(in_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
 
   feature_extraction = make_layer(5, mid_channels); // num_blocks = 5, mid_channels = mid_channels
   feature_extraction = register_module("feature_extraction", feature_extraction);
 
   // extract pyramid features
-  conv_l2_1 = register_module("conv_l2_1", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(2).padding(1).bias(true)));
-  conv_l2_2 = register_module("conv_l2_2", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
-  conv_l3_1 = register_module("conv_l3_1", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(2).padding(1).bias(true)));
-  conv_l3_2 = register_module("conv_l3_2", torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
+  conv_l2_1 = register_module("conv_l2_1",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(2).padding(1).bias(true)));
+  conv_l2_2 = register_module("conv_l2_2",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
+  conv_l3_1 = register_module("conv_l3_1",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(2).padding(1).bias(true)));
+  conv_l3_2 = register_module("conv_l3_2",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
 
   //PCD module
   PCDTest = DCNv2Pack(
@@ -245,11 +282,25 @@ EDVRNet::EDVRNet(int in_channels, int  mid_channels) {
 
   // reconstruction
   reconstruction = make_layer(10, mid_channels);  // num_blocks = 5, mid_channels = mid_channels
+  reconstruction = register_module("reconstruction", reconstruction);
   pixel_shuffle = register_module("pixel_shuffle", torch::nn::PixelShuffle(torch::nn::PixelShuffleOptions(2)));
+
+  // upsample
+  upconv1 = register_module("upconv1",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels * 4, {3,3}).stride(1).padding(1).bias(true)));
+
+  upconv2 = register_module("upconv2",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, 64 * 4, {3,3}).stride(1).padding(1).bias(true)));
+
+  conv_hr = register_module("conv_hr",\
+   torch::nn::Conv2d(torch::nn::Conv2dOptions(64, 64, {3,3}).stride(1).padding(1).bias(true)));
+
+  conv_last = register_module("conv_last", torch::nn::Conv2d(torch::nn::Conv2dOptions(64, 3, {3,3}).stride(1).padding(1).bias(true)));
 
   // activate function
   lrelu = register_module("lrelu", torch::nn::LeakyReLU(torch::nn::LeakyReLUOptions().negative_slope(0.1)));
 }
+
 
 // define spatial padding functon
 torch::Tensor EDVRNet::spatial_padding(torch::Tensor lrs) {
@@ -262,6 +313,7 @@ torch::Tensor EDVRNet::spatial_padding(torch::Tensor lrs) {
 
   return lrs.view({b, t, c, h+pad_h, w+pad_w});
 }
+
 
 // forward function
 torch::Tensor EDVRNet::forward(torch::Tensor x) {
@@ -293,18 +345,23 @@ torch::Tensor EDVRNet::forward(torch::Tensor x) {
 
   // PCD module 
   // TODO
-  cout << "feat l1 size: " << feat_l1.sizes() << endl;
-  cout << "feat l2 size: " << feat_l2.sizes() << endl;
-  cout << "feat l3 size: " << feat_l3.sizes() << endl;
 
   auto out = PCDTest->forward(feat_l1, feat_l1);
 
   // TSA module 
-  // TODO
-  auto ttest = TSAFusionModule->forward(feat_l1);
+  auto feat = TSAFusionModule->forward(feat_l1);
 
   // Reconstruction module
-  // TODO
+  out = reconstruction->forward(feat);
+  out = lrelu->forward(pixel_shuffle->forward(upconv1->forward(out)));
+  out = lrelu->forward(pixel_shuffle->forward(upconv2->forward(out)));
+  out = lrelu->forward(conv_hr->forward(out));
+  out = conv_last->forward(out);
 
-  return x;
+  auto base = torch::nn::functional::interpolate(x_center,\
+   torch::nn::functional::InterpolateFuncOptions().size(std::vector<int64_t>({4,4})).mode(torch::kBilinear).align_corners(false));
+
+  out += base;
+
+  return out;
 }

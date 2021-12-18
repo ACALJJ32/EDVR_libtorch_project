@@ -19,9 +19,6 @@ int main() {
   cout<<"Cudnn is available: "<<torch::cuda::cudnn_is_available()<<endl;
   cout<<"GPU count: "<<torch::cuda::device_count()<<endl;
 
-  // Test load library
-  // void *handle = dlopen("./lib/dcn.cpython-38-x86_64-linux-gnu.so", RTLD_NOW);
-
   // Set device
   torch::DeviceType device_type = at::kCPU;
   if(torch::cuda::is_available())
