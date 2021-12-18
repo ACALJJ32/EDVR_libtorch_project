@@ -238,7 +238,7 @@ class EDVRNet: public torch::nn::Module{
 
     // PCD module  
     // TODO
-    torch::nn::Sequential PCDTest{nullptr};
+    torch::nn::Sequential PCDAlignmentModule{nullptr};
 
     // TSA module
     torch::nn::Sequential TSAFusionModule{nullptr};
@@ -271,10 +271,10 @@ EDVRNet::EDVRNet(int in_channels, int  mid_channels) {
    torch::nn::Conv2d(torch::nn::Conv2dOptions(mid_channels, mid_channels, {3,3}).stride(1).padding(1).bias(true)));
 
   //PCD module
-  PCDTest = DCNv2Pack(
+  PCDAlignmentModule = DCNv2Pack(
     mid_channels, mid_channels, 3, 1, 1, 1, 1, 8);
 
-  PCDTest = register_module("PCDTest", PCDTest);  
+  PCDAlignmentModule = register_module("PCDAlignmentModule", PCDAlignmentModule);  
 
   // TSA module
   TSAFusionModule = TSAFusionSequential(mid_channels, 5, 2);
@@ -343,25 +343,24 @@ torch::Tensor EDVRNet::forward(torch::Tensor x) {
   feat_l2 = feat_l2.view({b, t, -1, h / 2, w / 2});
   feat_l3 = feat_l3.view({b, t, -1, h / 4, w / 4});
 
-  // PCD module 
+  // PCD alignment
   // TODO
 
-  auto out = PCDTest->forward(feat_l1, feat_l1);
+  // auto out = PCDAli->forward(feat_l1, feat_l1);
 
   // TSA module 
   auto feat = TSAFusionModule->forward(feat_l1);
 
   // Reconstruction module
-  out = reconstruction->forward(feat);
+  auto out = reconstruction->forward(feat);
   out = lrelu->forward(pixel_shuffle->forward(upconv1->forward(out)));
   out = lrelu->forward(pixel_shuffle->forward(upconv2->forward(out)));
   out = lrelu->forward(conv_hr->forward(out));
   out = conv_last->forward(out);
 
   auto base = torch::nn::functional::interpolate(x_center,\
-   torch::nn::functional::InterpolateFuncOptions().size(std::vector<int64_t>({4,4})).mode(torch::kBilinear).align_corners(false));
-
+   torch::nn::functional::InterpolateFuncOptions().size(std::vector<int64_t>({h * 4, w * 4})).mode(torch::kBilinear).align_corners(false));
   out += base;
-
+  
   return out;
 }
